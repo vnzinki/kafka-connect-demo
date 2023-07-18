@@ -1,0 +1,4 @@
+flake8==6.0.0
+schedule==1.2.0
+sqlalchemy==2.0.17
+psycopg2==2.9.6

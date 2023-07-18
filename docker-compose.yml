@@ -1,0 +1,159 @@
+version: "3"
+services:
+  # mysql:
+  #   image: mariadb
+  #   ports:
+  #     - 3306:3306
+  #   command:
+  #     - mariadbd
+  #     - --log-bin=mysql-bin
+  #     - --binlog-format=ROW
+  #   environment:
+  #     - MYSQL_USER=user
+  #     - MYSQL_PASSWORD=password
+  #     - MYSQL_ROOT_PASSWORD=password
+  #     - MYSQL_DATABASE=database
+
+  postgres:
+    image: postgres
+    ports:
+      - 15432:5432
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+    environment:
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=database
+
+  timescaledb:
+    image: timescale/timescaledb:latest-pg14
+    ports:
+      - 5432:5432
+    environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=database
+
+  # sqlserver:
+  #   image: mcr.microsoft.com/mssql/server:2019-latest
+  #   ports:
+  #     - 1433:1433
+  #   environment:
+  #     - ACCEPT_EULA=Y
+  #     - MSSQL_PID=Developer
+  #     - MSSQL_SA_PASSWORD=Str0ngPassw0rd!
+  #     - MSSQL_AGENT_ENABLED=true
+
+  # elasticsearch:
+  #   image: docker.elastic.co/elasticsearch/elasticsearch:8.4.2
+  #   ports:
+  #     - 9200:9200
+  #   environment:
+  #     - discovery.type=single-node
+  #     - xpack.security.enabled=false
+  #     - 'ES_JAVA_OPTS: -Xms1g -Xmx1g'
+  # kibana:
+  #   image: docker.elastic.co/kibana/kibana:8.4.2
+  #   ports:
+  #     - 5601:5601
+  #   environment:
+  #     - ELASTICSEARCH_HOSTS=["http://elasticsearch:9200"]
+
+  zookeeper:
+    platform: linux/x86_64
+    image: bitnami/zookeeper:3.8
+    ports:
+      - "2181:2181"
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
+
+  kafka:
+    platform: linux/x86_64
+    image: bitnami/kafka:3.2
+    ports:
+      - "9094:9094"
+    environment:
+      - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_AUTO_CREATE_TOPICS_ENABLE=true
+      - KAFKA_LISTENERS=INTERNAL://0.0.0.0:9092,OUTSIDE://0.0.0.0:9094
+      - KAFKA_ADVERTISED_LISTENERS=INTERNAL://kafka:9092,OUTSIDE://localhost:9094
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=INTERNAL:PLAINTEXT,OUTSIDE:PLAINTEXT
+      - KAFKA_INTER_BROKER_LISTENER_NAME=INTERNAL
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+      - ALLOW_PLAINTEXT_LISTENER=yes
+    depends_on:
+      - zookeeper
+
+  akhq:
+    image: tchiotludo/akhq
+    environment:
+      AKHQ_CONFIGURATION: |
+        akhq:
+          connections:
+            docker-kafka-server:
+              properties:
+                bootstrap.servers: "kafka:9092"
+    ports:
+      - 8080:8080
+
+  kafka-connect-source:
+    platform: linux/x86_64
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - 18083:8083
+    healthcheck:
+      test: ./healthz -url http://localhost:8083
+      interval: 3s
+      retries: 2
+      start_period: 60s
+      timeout: 10s
+    volumes:
+      - './connect.properties:/etc/kafka/connect.properties'
+      # - './debezium-mysql-source-connector.properties:/etc/kafka/debezium-mysql-source-connector.properties'
+      - './debezium-postgres-source-connector.properties:/etc/kafka/debezium-postgres-source-connector.properties'
+      # - './debezium-sqlserver-source-connector.properties:/etc/kafka/debezium-sqlserver-source-connector.properties'
+    depends_on:
+      - zookeeper
+      - kafka
+    command:
+      - 'connect-standalone'
+      - '/etc/kafka/connect.properties'
+      # - '/etc/kafka/debezium-sqlserver-source-connector.properties'
+      - '/etc/kafka/debezium-postgres-source-connector.properties'
+      # - '/etc/kafka/debezium-mysql-source-connector.properties'
+    environment:
+      - CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR=1
+      - CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR=1
+      - CONNECT_STATUS_STORAGE_REPLICATION_FACTOR=1
+  kafka-connect-sink:
+    platform: linux/x86_64
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - 28083:8083
+    healthcheck:
+      test: ./healthz -url http://localhost:8083
+      interval: 3s
+      retries: 2
+      start_period: 60s
+      timeout: 10s
+    volumes:
+      - './connect.properties:/etc/kafka/connect.properties'
+      - './jdbc-postgres-sink-connector.properties:/etc/kafka/jdbc-postgres-sink-connector.properties'
+      # - './elasticsearch-sink-connector.properties:/etc/kafka/elasticsearch-sink-connector.properties'
+    depends_on:
+      - zookeeper
+      - kafka
+    command:
+      - 'connect-standalone'
+      - '/etc/kafka/connect.properties'
+      - '/etc/kafka/jdbc-postgres-sink-connector.properties'
+      # - '/etc/kafka/elasticsearch-sink-connector.properties'
+    environment:
+      - CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR=1
+      - CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR=1
+      - CONNECT_STATUS_STORAGE_REPLICATION_FACTOR=1
